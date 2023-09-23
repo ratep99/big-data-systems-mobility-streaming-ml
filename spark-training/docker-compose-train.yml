@@ -1,0 +1,15 @@
+version: "3"
+
+services:
+  model-training:
+    build: ./training/
+    image: model-training:latest
+    container_name: spark-ml
+    environment:
+      SPARK_MASTER_NAME: spark-master
+      SPARK_MASTER_PORT: 7077
+      ENABLE_INIT_DAEMON: "false"
+networks:
+  default:
+    external:
+      name: bde
