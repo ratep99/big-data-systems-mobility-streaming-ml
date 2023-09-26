@@ -2,7 +2,7 @@ version: "3"
 
 services:
   prediction-streaming:
-    build: ./streaming/
+    build: ./spark-streaming/
     image: prediction-streaming:latest
     container_name: prediction-streaming
     environment:

@@ -2,7 +2,7 @@ version: "3"
 
 services:
   model-training:
-    build: ./training/
+    build: ./spark-training/
     image: model-training:latest
     container_name: spark-ml
     environment:

@@ -1,4 +1,5 @@
 from pyspark import SparkContext
+from pyspark.ml import PipelineModel
 from pyspark.sql import SparkSession
 from pyspark.sql.types import StructType, StructField, StringType
 from pyspark.ml.feature import StringIndexerModel, VectorAssembler, MinMaxScalerModel, StandardScalerModel
@@ -61,20 +62,30 @@ class InfluxDBWriter:
                     .field("distance", float(row['distance'])) \
                     .field("odometer", float(row['odometer'])) \
                     .field("pos", float(row['pos'])) \
-                    .field("prediction_speed", float(row['prediction'])) \
+                    .field("prediction", float(row['prediction'])) \
                     .time(timestamp, write_precision='ms')
     
-
-if __name__ == '__main__': 
-    
-    appName = "Projekat3Stream"
-    spark = SparkSession.builder.appName(appName).getOrCreate()
+def create_spark_session(app_name):
+    """
+    Create a Spark session with the given app name and set log level to ERROR.
+    """
+    spark = SparkSession.builder.appName(app_name).getOrCreate()
     spark.sparkContext.setLogLevel("ERROR")
+    return spark
 
+def load_models():
+    """
+    Load the machine learning models and scaler.
+    """
     model = LinearRegressionModel.load(MODEL_LOCATION)
     scaler = StandardScalerModel.load(SCALER_LOCATION)
     indexer = StringIndexerModel.load(INDEXER_LOCATION)
-    
+    return model, scaler, indexer
+
+def read_kafka_data(spark):
+    """
+    Read data from Kafka with specified configuration.
+    """
     df = (
         spark.readStream.format("kafka")
         .option("kafka.bootstrap.servers", KAFKA_URL)
@@ -82,8 +93,43 @@ if __name__ == '__main__':
         .option("startingOffsets", "latest")
         .load()
     )
-    schema = StructType(
-    [
+    return df
+
+def transform_data(df, schema):
+    """
+    Transform the incoming data using the provided schema.
+    """
+    parsed_values = df.select(
+        "timestamp", from_json(col("value").cast("string"), schema).alias("parsed_values")
+    )
+
+    df_org = (
+        parsed_values
+        .select(
+            "timestamp",
+            "parsed_values.id",
+            "parsed_values.type",
+            "parsed_values.latitude",
+            "parsed_values.longitude",
+            "parsed_values.speed_kmh",
+            "parsed_values.acceleration",
+            "parsed_values.distance",
+            "parsed_values.odometer",
+            "parsed_values.pos"
+        )
+    )
+    return df_org
+if __name__ == '__main__': 
+    
+    appName = "Projekat3Stream"
+    # Create a Spark session
+    spark = create_spark_session(appName)
+
+    # Load models and scaler
+    model, scaler, indexer = load_models()
+
+    # Define schema for parsing Kafka data
+    schema = StructType([
         StructField("timestamp", StringType()),
         StructField("id", StringType()),
         StructField("type", StringType()),
@@ -93,41 +139,20 @@ if __name__ == '__main__':
         StructField("acceleration", StringType()),
         StructField("distance", StringType()),
         StructField("odometer", StringType()),
-        StructField("pos", StringType()),
-    ]
-)
+        StructField("pos", StringType())
+    ])
 
+    # Read data from Kafka
+    df = read_kafka_data(spark)
 
     parsed_values = df.select(
         "timestamp", from_json(col("value").cast("string"), schema).alias("parsed_values")
     )
 
-    df_org = (
-    parsed_values
-    .select(
-        "timestamp",
-        from_json(col("value").cast("string"), schema).alias("parsed_values")
-    )
-    .select(
-        "timestamp",
-        "parsed_values.id",
-        "parsed_values.type",
-        "parsed_values.latitude",
-        "parsed_values.longitude",
-        "parsed_values.speed_kmh",
-        "parsed_values.acceleration",
-        "parsed_values.distance",
-        "parsed_values.odometer",
-        "parsed_values.pos"
-    )
-)
-
+    # Transform the data
+    df_org = transform_data(df, schema)
 
     indexed = indexer.transform(df_org)
-
-    indexed = indexed.drop('busID')
-    indexed = indexed.drop('busLine')
-    indexed = indexed.drop('datetime')
 
     columns = ["latitude", "longitude", "speed_kmh", "acceleration", "distance", "odometer", "pos"]
 
