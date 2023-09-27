@@ -1,5 +1,7 @@
 version: "3"
-
+networks:
+    bde:
+      external: true
 services:
   prediction-streaming:
     build: ./spark-streaming/
@@ -16,23 +18,25 @@ services:
       INFLUXDB_USERNAME: admin
       INFLUXDB_PASSWORD: admin
       INFLUXDB_DATABASE: denver_vehicles
+    networks:
+      - bde
   influxdb:
-    image: influxdb:1.8
+    image: influxdb:2.1.1
     ports:
-      - "0.0.0.0:8086:8086"
+      - 8086:8086
     container_name: influxdb
     hostname: influxdb
     environment:
       - INFLUXDB_ADMIN_ENABLED=true
       - INFLUXDB_DB=denver_vehicles
       - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=2c83186a-caab-425a-9594-9d4c00544939
+    networks:
+      - bde
   grafana:
     image: grafana/grafana
     ports:
       - "0.0.0.0:3000:3000"
     container_name: grafana
     hostname: grafana
-networks:
-  default:
-    external:
-      name: bde
+    networks:
+      - bde

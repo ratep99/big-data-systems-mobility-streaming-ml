@@ -9,9 +9,9 @@ from pyspark.sql.functions import concat, date_format, lit, to_timestamp, hour, 
 from pyspark.sql.types import *
 
 import os
+
 from influxdb_client import InfluxDBClient, Point
 from influxdb_client.client.write_api import SYNCHRONOUS
-#from influxdb import InfluxDBClient
 from datetime import datetime
 
       
@@ -28,9 +28,10 @@ KAFKA_TOPIC = 'vehicles_topic'
 
 
 class InfluxDBWriter:
+    print("Počinje štampanje!")
     def __init__(self):
         self._org = 'denver_vehicles'
-        self._token = '2c83186a-caab-425a-9594-9d4c00544939'
+        self._token = 'P9MQUbxzG7C8WwCfbCH6cKPXhLCcbOgUaWqSPth7qfDIjbZqmUOQPHtxDa1Qn2hio0v5orjl-Px4D0znn-gRvw=='
         self.client = InfluxDBClient(
             url = "http://influxdb:8086", token=self._token, org = self._org)
         self.write_api = self.client.write_api(write_options=SYNCHRONOUS)
@@ -82,52 +83,17 @@ def load_models():
     indexer = StringIndexerModel.load(INDEXER_LOCATION)
     return model, scaler, indexer
 
-def read_kafka_data(spark):
-    """
-    Read data from Kafka with specified configuration.
-    """
-    df = (
-        spark.readStream.format("kafka")
-        .option("kafka.bootstrap.servers", KAFKA_URL)
-        .option("subscribe", KAFKA_TOPIC)
-        .option("startingOffsets", "latest")
-        .load()
-    )
-    return df
 
-def transform_data(df, schema):
-    """
-    Transform the incoming data using the provided schema.
-    """
-    parsed_values = df.select(
-        "timestamp", from_json(col("value").cast("string"), schema).alias("parsed_values")
-    )
-
-    df_org = (
-        parsed_values
-        .select(
-            "timestamp",
-            "parsed_values.id",
-            "parsed_values.type",
-            "parsed_values.latitude",
-            "parsed_values.longitude",
-            "parsed_values.speed_kmh",
-            "parsed_values.acceleration",
-            "parsed_values.distance",
-            "parsed_values.odometer",
-            "parsed_values.pos"
-        )
-    )
-    return df_org
 if __name__ == '__main__': 
     
     appName = "Projekat3Stream"
+    print("CREATING SESSION...")
     # Create a Spark session
     spark = create_spark_session(appName)
-
+    print("LOAD MODELS AND SCALERS...")
     # Load models and scaler
     model, scaler, indexer = load_models()
-
+    print("PARSING KAFKA DATA")
     # Define schema for parsing Kafka data
     schema = StructType([
         StructField("timestamp", StringType()),
@@ -143,25 +109,64 @@ if __name__ == '__main__':
     ])
 
     # Read data from Kafka
-    df = read_kafka_data(spark)
-
+    df = (
+        spark.readStream.format("kafka")
+        .option("kafka.bootstrap.servers", KAFKA_URL)
+        .option("subscribe", KAFKA_TOPIC)
+        .option("startingOffsets", "latest")
+        .load()
+    )
+    print("TRANSFORMING DATA")
+    # Transform the data
     parsed_values = df.select(
         "timestamp", from_json(col("value").cast("string"), schema).alias("parsed_values")
     )
+    parsed_values.printSchema()
+    df_org = parsed_values.select(
+        "timestamp",
+        "parsed_values.id",
+        "parsed_values.type",
+        "parsed_values.latitude",
+        "parsed_values.longitude",
+        "parsed_values.speed_kmh",
+        "parsed_values.acceleration",
+        "parsed_values.distance",
+        "parsed_values.odometer",
+        "parsed_values.pos"
+    )
+    df_org.printSchema()
+    print(" DATA TRANSFORMED ")
+    df_org = df_org.withColumn("latitude", col("latitude").cast("double"))
+    df_org = df_org.withColumn("longitude", col("longitude").cast("double"))
+    df_org = df_org.withColumn("speed_kmh", col("speed_kmh").cast("double"))
+    df_org = df_org.withColumn("acceleration", col("acceleration").cast("double"))
+    df_org = df_org.withColumn("distance", col("distance").cast("double"))
+    df_org = df_org.withColumn("odometer", col("odometer").cast("double"))
+    df_org = df_org.withColumn("pos", col("pos").cast("double"))
 
-    # Transform the data
-    df_org = transform_data(df, schema)
+    # Manipulacija sa kolonom datetime
+    df_org = df_org.withColumn("datetime", concat(col("timestamp"), lit("Z")))
+    df_org = df_org.withColumn("datetime", to_timestamp("datetime", "yyyy-MM-dd'T'HH:mm:ss.SSSX"))
+    df_org = df_org.drop("timestamp")
 
+    # Formatiranje datuma
+    df_org = df_org.withColumn("datetime", date_format("datetime", "yyyy-MM-dd HH:mm:ss"))
+
+    # Prikazivanje rezultata
+    #df_org.show()
+
+    print("Poslednji df")
+    df_org.printSchema()
     indexed = indexer.transform(df_org)
 
-    columns = ["latitude", "longitude", "speed_kmh", "acceleration", "distance", "odometer", "pos"]
+    columns = ["latitude", "longitude", "speed_kmh", "acceleration", "distance"]
 
     va = VectorAssembler().setInputCols(columns).setOutputCol('features').setHandleInvalid("skip").transform(indexed)
 
     scaled = scaler.transform(va)
 
     predictions = model.transform(scaled)
-
+    print("Stampam predikcije!")
     predictions.printSchema()
 
     query = predictions.writeStream \

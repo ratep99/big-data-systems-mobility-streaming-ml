@@ -9,9 +9,3 @@ ENV HDFS_BUS='hdfs://namenode:9000/dir/denverVehiclesCleaned.csv'
 ENV MODEL_LOCATION='hdfs://namenode:9000/dir/model'
 ENV SCALER_LOCATION='hdfs://namenode:9000/dir/scaler'
 ENV INDEXER_LOCATION='hdfs://namenode:9000/dir/indexer'
-
-
-ADD start.sh /
-
-RUN chmod +x /start.sh
-CMD ["/bin/bash", "/start.sh"]
